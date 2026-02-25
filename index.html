@@ -37,7 +37,7 @@
             display: block;
         }
 
-        /* Loading spinner */
+        /* Loading overlay – disappears as soon as frame 0 is ready */
         #scrolly-loader {
             position: absolute;
             inset: 0;
@@ -45,16 +45,22 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 1rem;
+            gap: 1.25rem;
             background: #121212;
             z-index: 10;
+            transition: opacity 0.5s ease;
+        }
+
+        #scrolly-loader.fade-out {
+            opacity: 0;
+            pointer-events: none;
         }
 
         .loader-ring {
             width: 3.5rem;
             height: 3.5rem;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-top-color: #fff;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            border-top-color: #D4AF37;
             border-radius: 50%;
             animation: spin 0.9s linear infinite;
         }
@@ -67,10 +73,47 @@
 
         .loader-text {
             color: rgba(255, 255, 255, 0.5);
-            font-size: 0.75rem;
-            letter-spacing: 0.25em;
+            font-size: 0.7rem;
+            letter-spacing: 0.3em;
             text-transform: uppercase;
             font-weight: 300;
+        }
+
+        /* Progress bar inside the full-screen loader */
+        .loader-bar-track {
+            width: 160px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .loader-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #D4AF37, #fff);
+            border-radius: 2px;
+            transition: width 0.2s ease;
+        }
+
+        .loader-pct {
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 0.65rem;
+            letter-spacing: 0.2em;
+            margin-top: -0.5rem;
+        }
+
+        /* Thin gold strip at bottom of canvas – visible while remaining frames stream */
+        #scrolly-bg-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 2px;
+            width: 0%;
+            background: linear-gradient(90deg, #D4AF37, rgba(212, 175, 55, 0.3));
+            z-index: 30;
+            transition: width 0.3s ease, opacity 0.6s ease;
+            pointer-events: none;
         }
 
         /* Text overlay panels */
@@ -600,11 +643,17 @@
                 <!-- Canvas -->
                 <canvas id="scrolly-canvas"></canvas>
 
-                <!-- Loading state -->
+                <!-- Loading state: vanishes as soon as frame 0 arrives -->
                 <div id="scrolly-loader">
                     <div class="loader-ring"></div>
-                    <span class="loader-text">Loading Sequence…</span>
+                    <span class="loader-text">Loading Sequence</span>
+                    <div class="loader-bar-track">
+                        <div class="loader-bar-fill" id="loader-bar"></div>
+                    </div>
+                    <span class="loader-pct" id="loader-pct">0%</span>
                 </div>
+                <!-- Thin gold bar: tracks remaining frames loading in background -->
+                <div id="scrolly-bg-progress"></div>
 
                 <!-- Text overlays -->
                 <div class="scrolly-overlay">
@@ -1283,120 +1332,140 @@
 
     <script>
         /* ══════════════════════════════════════════════════════════════
-           SCROLLYTELLING CANVAS  –  ported from portfolio-app (Next.js)
-           Reads 136 PNG frames from portfolio-app/public/canvas/
+           SCROLLYTELLING CANVAS – Progressive Loading
+           Frame 0 appears in ~1 s. Remaining 135 frames stream in background.
         ══════════════════════════════════════════════════════════════ */
         (function () {
-            const CANVAS_DIR = 'canvas/';
-            const TOTAL_FRAMES = 136;
+            var CANVAS_DIR = 'canvas/';
+            var TOTAL_FRAMES = 136;
 
-            // Build sorted frame filenames (same naming convention as Next.js app)
-            const frameNames = [];
-            for (let i = 0; i < TOTAL_FRAMES; i++) {
-                frameNames.push(`frame_${String(i).padStart(3, '0')}_delay-0.058s.png`);
-            }
-
-            const canvas = document.getElementById('scrolly-canvas');
-            const loader = document.getElementById('scrolly-loader');
-            const wrapper = document.getElementById('scrolly-wrapper');
-            const panels = {
+            // DOM refs
+            var canvas = document.getElementById('scrolly-canvas');
+            var loader = document.getElementById('scrolly-loader');
+            var loaderBar = document.getElementById('loader-bar');
+            var loaderPct = document.getElementById('loader-pct');
+            var bgProg = document.getElementById('scrolly-bg-progress');
+            var wrapper = document.getElementById('scrolly-wrapper');
+            var panels = {
                 1: document.getElementById('sp1'),
                 2: document.getElementById('sp2'),
                 3: document.getElementById('sp3'),
-                4: document.getElementById('sp4'),
+                4: document.getElementById('sp4')
             };
 
-            const images = new Array(TOTAL_FRAMES);
-            let loaded = 0;
-            let currentFrame = 0;
-            let isReady = false;
+            var images = new Array(TOTAL_FRAMES);
+            var loadedCount = 0;
+            var currentFrame = 0;
+            var isReady = false;   // true once frame 0 is drawn
+            var allDone = false;   // true once all 136 frames are loaded
 
-            /* ── object-fit: cover draw ─────────────────────────── */
+            // ── draw with object-fit:cover ─────────────────────────────
             function drawFrame(img) {
-                const ctx = canvas.getContext('2d');
+                var ctx = canvas.getContext('2d');
                 if (!ctx || !img || !img.complete) return;
-                const cW = canvas.width, cH = canvas.height;
-                const iW = img.naturalWidth, iH = img.naturalHeight;
+                var cW = canvas.width, cH = canvas.height;
+                var iW = img.naturalWidth, iH = img.naturalHeight;
                 if (!iW || !iH) return;
-                const cAR = cW / cH, iAR = iW / iH;
-                let sx = 0, sy = 0, sw = iW, sh = iH;
+                var cAR = cW / cH, iAR = iW / iH;
+                var sx = 0, sy = 0, sw = iW, sh = iH;
                 if (iAR > cAR) { sw = Math.round(iH * cAR); sx = Math.round((iW - sw) / 2); }
                 else { sh = Math.round(iW / cAR); sy = Math.round((iH - sh) / 2); }
                 ctx.clearRect(0, 0, cW, cH);
                 ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cW, cH);
             }
 
-            /* ── resize canvas ──────────────────────────────────── */
+            // Find the nearest already-loaded frame to idx
+            function nearestLoaded(idx) {
+                for (var i = idx; i >= 0; i--)     if (images[i]) return i;
+                for (var j = idx + 1; j < TOTAL_FRAMES; j++) if (images[j]) return j;
+                return -1;
+            }
+
+            // ── canvas resize ──────────────────────────────────────────
             function resizeCanvas() {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
-                if (isReady && images[currentFrame]) drawFrame(images[currentFrame]);
+                var f = nearestLoaded(currentFrame);
+                if (f >= 0) drawFrame(images[f]);
             }
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
 
-            /* ── preload all frames ─────────────────────────────── */
-            frameNames.forEach(function (name, i) {
-                const img = new Image();
-                img.src = CANVAS_DIR + name;
-                img.onload = function () {
-                    images[i] = img;
-                    loaded++;
-                    if (loaded === TOTAL_FRAMES) onAllLoaded();
-                };
-                img.onerror = function () {
-                    loaded++;
-                    if (loaded === TOTAL_FRAMES) onAllLoaded();
-                };
-            });
-
-            function onAllLoaded() {
-                isReady = true;
-                loader.style.display = 'none';
-                canvas.style.display = 'block';
-                if (images[0]) drawFrame(images[0]);
-                updateScroll();  // snap to correct frame for current scroll position
+            // ── progressive loader ─────────────────────────────────────
+            function loadImg(i, cb) {
+                var img = new Image();
+                img.onload = function () { images[i] = img; loadedCount++; cb(); };
+                img.onerror = function () { loadedCount++; cb(); };
+                img.src = CANVAS_DIR + 'frame_' + String(i).padStart(3, '0') + '_delay-0.058s.png';
             }
 
-            /* ── scroll → frame + panels ────────────────────────── */
-            function getActivePanel(progress) {
-                if (progress >= 0.04 && progress < 0.28) return 1;
-                if (progress >= 0.32 && progress < 0.56) return 2;
-                if (progress >= 0.60 && progress < 0.84) return 3;
-                if (progress >= 0.88) return 4;
+            // Step 1: load ONLY frame 0 – show it ASAP
+            loadImg(0, function () {
+                isReady = true;
+                loader.classList.add('fade-out');
+                setTimeout(function () { loader.style.display = 'none'; }, 500);
+                canvas.style.display = 'block';
+                drawFrame(images[0]);
+                updateScroll();
+
+                // Step 2: load frames 1-135 concurrently in background
+                for (var i = 1; i < TOTAL_FRAMES; i++) {
+                    loadImg(i, onBgFrame);
+                }
+            });
+
+            function onBgFrame() {
+                var pct = Math.round((loadedCount / TOTAL_FRAMES) * 100);
+                if (loaderBar) loaderBar.style.width = pct + '%';
+                if (loaderPct) loaderPct.textContent = pct + '%';
+                if (bgProg) bgProg.style.width = pct + '%';
+
+                if (loadedCount === TOTAL_FRAMES) {
+                    allDone = true;
+                    if (bgProg) {
+                        bgProg.style.width = '100%';
+                        setTimeout(function () { bgProg.style.opacity = '0'; }, 800);
+                    }
+                    updateScroll(); // redraw with correct frame now it's loaded
+                }
+            }
+
+            // ── scroll handler ─────────────────────────────────────────
+            function getActivePanel(p) {
+                if (p >= 0.04 && p < 0.28) return 1;
+                if (p >= 0.32 && p < 0.56) return 2;
+                if (p >= 0.60 && p < 0.84) return 3;
+                if (p >= 0.88) return 4;
                 return null;
             }
 
-            let activePanel = null;
-            let typewriterStarted = false;
+            var activePanel = null;
+            var typewriterStarted = false;
 
             function updateScroll() {
                 if (!isReady) return;
 
-                // Scroll progress within the scrolly wrapper
-                const wrapperTop = wrapper.getBoundingClientRect().top + window.scrollY;
-                const wrapperHeight = wrapper.offsetHeight - window.innerHeight;
-                const scrolled = Math.max(0, window.scrollY - wrapperTop);
-                const progress = Math.min(1, wrapperHeight > 0 ? scrolled / wrapperHeight : 0);
+                var wrapperTop = wrapper.getBoundingClientRect().top + window.scrollY;
+                var wrapperHeight = wrapper.offsetHeight - window.innerHeight;
+                var scrolled = Math.max(0, window.scrollY - wrapperTop);
+                var progress = Math.min(1, wrapperHeight > 0 ? scrolled / wrapperHeight : 0);
 
-                // Frame
-                const idx = Math.min(Math.floor(progress * TOTAL_FRAMES), TOTAL_FRAMES - 1);
-                if (idx !== currentFrame) {
-                    currentFrame = idx;
-                    if (images[idx]) drawFrame(images[idx]);
+                // Target frame; fall back to nearest loaded frame if not ready yet
+                var idx = Math.min(Math.floor(progress * TOTAL_FRAMES), TOTAL_FRAMES - 1);
+                var best = images[idx] ? idx : nearestLoaded(idx);
+                if (best >= 0 && best !== currentFrame) {
+                    currentFrame = best;
+                    drawFrame(images[best]);
                 }
 
-                // Panels
-                const next = getActivePanel(progress);
+                // Panel visibility
+                var next = getActivePanel(progress);
                 if (next !== activePanel) {
-                    // hide previous
-                    if (activePanel !== null && panels[activePanel]) {
+                    if (activePanel !== null && panels[activePanel])
                         panels[activePanel].classList.remove('visible');
-                    }
                     activePanel = next;
                     if (activePanel !== null && panels[activePanel]) {
                         panels[activePanel].classList.add('visible');
-                        // Trigger typewriter when CTA panel appears
                         if (activePanel === 4 && !typewriterStarted) {
                             typewriterStarted = true;
                             startTypewriter();
@@ -1407,13 +1476,11 @@
 
             window.addEventListener('scroll', updateScroll, { passive: true });
 
-            /* ── typewriter trigger for panel 4 ─────────────────── */
+            // ── typewriter trigger ─────────────────────────────────────
             function startTypewriter() {
-                // Signal to the existing typewriter code below
                 window._scrollyTypewriterReady = true;
-                if (typeof window._runTypewriter === 'function') {
+                if (typeof window._runTypewriter === 'function')
                     window._runTypewriter();
-                }
             }
         })();
         /* ══════════════════════════════════════════════════════════════ */
