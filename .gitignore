@@ -1,0 +1,12 @@
+# Vercel local config
+.vercel
+
+# Node / Next.js
+portfolio-app/node_modules/
+portfolio-app/.next/
+portfolio-app/.env*.local
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.log

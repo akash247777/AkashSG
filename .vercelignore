@@ -1,0 +1,26 @@
+# Excludes from Vercel deployment to stay within the 100 MB bundle limit
+
+# ── Next.js app (not needed for static deployment) ────────────────
+portfolio-app/node_modules
+portfolio-app/.next
+portfolio-app/.git
+portfolio-app/src
+portfolio-app/package*.json
+portfolio-app/tsconfig.json
+portfolio-app/next.config.ts
+portfolio-app/postcss.config.mjs
+portfolio-app/eslint.config.mjs
+portfolio-app/next-env.d.ts
+portfolio-app/README.md
+
+# Duplicate canvas frames (already in root /canvas/)
+portfolio-app/public/canvas
+
+# ── Git internals ──────────────────────────────────────────────────
+.git
+.github
+
+# ── Dev/editor files ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
