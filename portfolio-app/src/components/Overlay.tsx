@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence, useMotionValueEvent } from "framer-motion";
+import { motion, AnimatePresence, useMotionValueEvent, Variants } from "framer-motion";
 import { useScroll } from "framer-motion";
 
 interface OverlayProps {
@@ -17,7 +17,7 @@ function getActiveSection(progress: number): SectionId {
     return null;
 }
 
-const sectionVariants = {
+const sectionVariants: Variants = {
     hidden: { opacity: 0, y: 30 },
     visible: {
         opacity: 1,
