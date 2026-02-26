@@ -1396,7 +1396,7 @@
                 var img = new Image();
                 img.onload = function () { images[i] = img; loadedCount++; cb(); };
                 img.onerror = function () { loadedCount++; cb(); };
-                img.src = CANVAS_DIR + 'frame_' + String(i).padStart(3, '0') + '_delay-0.058s.png';
+                img.src = CANVAS_DIR + 'frame_' + String(i).padStart(3, '0') + '_delay-0.058s.png?v=2';
             }
 
             // Step 1: load ONLY frame 0 – show it ASAP
